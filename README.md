@@ -1,27 +1,13 @@
 # eBPF-VM
 
-A from-scratch eBPF virtual machine in Rust.
+eBPF virtual machine in Rust. Implements the full ISA — ALU64/ALU32, all JMP variants,
+LDX/ST/STX across all widths, wide loads, and CALL/EXIT with a depth-limited call stack.
+Two-level dispatch: class first, then (code, source). No external crates. No unsafe.
 
-No external crates. No unsafe.
+Verifier and JIT in progress.
 
-## Structure
+src/ has opcode/insn as newtypes with bitfield accessors, a unified error type, and the
+interpreter in vm.rs. tests/ covers ALU, control flow, and memory — 43 tests passing.
 
-src/
-  opcode.rs   — opcode model, bitfield accessors
-  insn.rs     — instruction encoding, wide load support
-  error.rs    — error types
-  vm.rs       — interpreter, dispatch, call stack
-  lib.rs      — re-exports
-
-tests/
-  alu.rs      — ALU64 / ALU32
-  jmp.rs      — control flow, CALL / EXIT
-  mem.rs      — loads, stores, fault cases
-
-## Build
-
-cargo build
-
-## Test
-
-cargo test
+    cargo build
+    cargo test
