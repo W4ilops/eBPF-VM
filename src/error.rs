@@ -6,6 +6,7 @@ use crate::insn::InsnError;
 pub enum EbpfError {
     Insn(InsnError),
     DivisionByZero { pc: usize },
+    InvalidInstruction { pc: usize },
     InvalidPc { pc: usize, bound: usize },
     UnknownOpcode { pc: usize, opcode: u8 },
     BackEdge { pc: usize },
@@ -16,6 +17,9 @@ pub enum EbpfError {
     MemoryFault { pc: usize, addr: u64 },
     CallStackExhausted,
     ProgramEmpty,
+    UseBeforeInit { pc: usize, reg: u8 },
+    InvalidPtrArithmetic { pc: usize },
+    TypeMismatch { pc: usize },
 }
 
 impl EbpfError {
@@ -23,6 +27,7 @@ impl EbpfError {
         match self {
             EbpfError::Insn(_) => "decode",
             EbpfError::DivisionByZero { pc: _ } => "arithmetic",
+            EbpfError::InvalidInstruction { pc: _ } => "decode",
             EbpfError::InvalidPc { pc: _, bound: _ } => "control-flow",
             EbpfError::UnknownOpcode { pc: _, opcode: _ } => "decode",
             EbpfError::BackEdge { pc: _ } => "control-flow",
@@ -33,6 +38,9 @@ impl EbpfError {
             EbpfError::MemoryFault { pc: _, addr: _ } => "memory",
             EbpfError::CallStackExhausted => "control-flow",
             EbpfError::ProgramEmpty => "program",
+            EbpfError::UseBeforeInit { pc: _, reg: _ } => "use-before-init",
+            EbpfError::InvalidPtrArithmetic { pc: _ } => "invalid-ptr-arith",
+            EbpfError::TypeMismatch { pc: _ } => "type-mismatch",
         }
     }
 }
@@ -42,6 +50,9 @@ impl fmt::Display for EbpfError {
         match self {
             EbpfError::Insn(e) => write!(f, "{e}"),
             EbpfError::DivisionByZero { pc } => write!(f, "division by zero at pc={pc}"),
+            EbpfError::InvalidInstruction { pc } => {
+                write!(f, "invalid instruction at pc={pc}")
+            }
             EbpfError::InvalidPc { pc, bound } => {
                 write!(f, "invalid pc={pc}, program length={bound}")
             }
@@ -64,6 +75,13 @@ impl fmt::Display for EbpfError {
             }
             EbpfError::CallStackExhausted => write!(f, "call stack exhausted"),
             EbpfError::ProgramEmpty => write!(f, "program contains no instructions"),
+            EbpfError::UseBeforeInit { pc, reg } => {
+                write!(f, "use before init at pc={pc}, reg={reg}")
+            }
+            EbpfError::InvalidPtrArithmetic { pc } => {
+                write!(f, "invalid pointer arithmetic at pc={pc}")
+            }
+            EbpfError::TypeMismatch { pc } => write!(f, "type mismatch at pc={pc}"),
         }
     }
 }
@@ -79,6 +97,7 @@ impl std::error::Error for EbpfError {
         match self {
             EbpfError::Insn(e) => Some(e),
             EbpfError::DivisionByZero { pc: _ } => None,
+            EbpfError::InvalidInstruction { pc: _ } => None,
             EbpfError::InvalidPc { pc: _, bound: _ } => None,
             EbpfError::UnknownOpcode { pc: _, opcode: _ } => None,
             EbpfError::BackEdge { pc: _ } => None,
@@ -89,6 +108,9 @@ impl std::error::Error for EbpfError {
             EbpfError::MemoryFault { pc: _, addr: _ } => None,
             EbpfError::CallStackExhausted => None,
             EbpfError::ProgramEmpty => None,
+            EbpfError::UseBeforeInit { pc: _, reg: _ } => None,
+            EbpfError::InvalidPtrArithmetic { pc: _ } => None,
+            EbpfError::TypeMismatch { pc: _ } => None,
         }
     }
 }

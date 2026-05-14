@@ -24,7 +24,7 @@ fn run_test(name: &str, f: fn() -> Result<(), String>) {
     }
 }
 
-fn prog(insns: &[(u64)]) -> Vec<Insn> {
+fn prog(insns: &[u64]) -> Vec<Insn> {
     insns
         .iter()
         .map(|raw| Insn::from_raw(*raw).unwrap())
