@@ -1,15 +1,33 @@
 use crate::error::EbpfError;
+use crate::helpers::{
+    HELPER_MAP_DELETE_ELEM, HELPER_MAP_LOOKUP_ELEM, HELPER_MAP_UPDATE_ELEM, HelperFn, HelperTable,
+};
 use crate::insn::Insn;
+use crate::map::{BpfMap, MapRegistry};
 use crate::opcode::{class, op, src};
 
 const EXEC_LIMIT: usize = 1_000_000;
+const CALL_STACK_LIMIT: usize = 8;
+const NEXT_PC_STEP: usize = 1;
+const REG_R0: usize = 0;
+const REG_R1: usize = 1;
+const REG_R2: usize = 2;
+const REG_R3: usize = 3;
+const REG_R4: usize = 4;
+const REG_R5: usize = 5;
+const REG_R10: usize = 10;
+const MAP_OP_SUCCESS: u64 = 0;
+const MAP_OP_FAILURE: u64 = 1;
+const STACK_SIZE: usize = 512;
 
 pub struct EbpfVm<'a> {
     prog: &'a [Insn],
     regs: [u64; 11],
-    stack: [u8; 512],
+    stack: [u8; STACK_SIZE],
     pc: usize,
     calls: Vec<usize>,
+    helper_table: HelperTable,
+    map_registry: MapRegistry,
 }
 
 impl<'a> EbpfVm<'a> {
@@ -18,14 +36,24 @@ impl<'a> EbpfVm<'a> {
             return Err(EbpfError::ProgramEmpty);
         }
         let mut regs = [0u64; 11];
-        regs[10] = 512;
+        regs[REG_R10] = STACK_SIZE as u64;
         Ok(Self {
             prog,
             regs,
-            stack: [0u8; 512],
+            stack: [0u8; STACK_SIZE],
             pc: 0,
-            calls: Vec::with_capacity(8),
+            calls: Vec::with_capacity(CALL_STACK_LIMIT),
+            helper_table: HelperTable::new(),
+            map_registry: MapRegistry::new(),
         })
+    }
+
+    pub fn register_helper(&mut self, id: u32, f: HelperFn) {
+        self.helper_table.register(id, f);
+    }
+
+    pub fn register_map(&mut self, map: Box<dyn BpfMap>) -> u64 {
+        self.map_registry.register(map)
     }
 
     pub fn run(&mut self) -> Result<u64, EbpfError> {
@@ -286,12 +314,73 @@ impl<'a> EbpfVm<'a> {
 
         match code {
             op::CALL => {
-                if self.calls.len() >= 8 {
-                    return Err(EbpfError::CallStackExhausted);
+                let helper_id = insn.imm() as u32;
+
+                if helper_id == HELPER_MAP_LOOKUP_ELEM && self.map_registry.len() > 0 {
+                    let handle = self.regs[REG_R1];
+                    let key = self.regs[REG_R2];
+                    if handle as usize >= self.map_registry.len() {
+                        return Err(EbpfError::InvalidMapHandle { pc });
+                    }
+                    self.regs[REG_R0] = self.map_registry.lookup(handle, key).unwrap_or(MAP_OP_SUCCESS);
+                    self.pc = self.pc.wrapping_add(NEXT_PC_STEP);
+                    Ok(())
+                } else if helper_id == HELPER_MAP_UPDATE_ELEM && self.map_registry.len() > 0 {
+                    let handle = self.regs[REG_R1];
+                    let key = self.regs[REG_R2];
+                    let val = self.regs[REG_R3];
+                    if handle as usize >= self.map_registry.len() {
+                        return Err(EbpfError::InvalidMapHandle { pc });
+                    }
+                    self.regs[REG_R0] = if self.map_registry.update(handle, key, val) {
+                        MAP_OP_SUCCESS
+                    } else {
+                        MAP_OP_FAILURE
+                    };
+                    self.pc = self.pc.wrapping_add(NEXT_PC_STEP);
+                    Ok(())
+                } else if helper_id == HELPER_MAP_DELETE_ELEM && self.map_registry.len() > 0 {
+                    let handle = self.regs[REG_R1];
+                    let key = self.regs[REG_R2];
+                    if handle as usize >= self.map_registry.len() {
+                        return Err(EbpfError::InvalidMapHandle { pc });
+                    }
+                    self.regs[REG_R0] = if self.map_registry.delete(handle, key) {
+                        MAP_OP_SUCCESS
+                    } else {
+                        MAP_OP_FAILURE
+                    };
+                    self.pc = self.pc.wrapping_add(NEXT_PC_STEP);
+                    Ok(())
+                } else {
+                    match self.helper_table.call(
+                        helper_id,
+                        self.regs[REG_R1],
+                        self.regs[REG_R2],
+                        self.regs[REG_R3],
+                        self.regs[REG_R4],
+                        self.regs[REG_R5],
+                    ) {
+                        Some(ret) => {
+                            self.regs[REG_R0] = ret;
+                            self.pc = self.pc.wrapping_add(NEXT_PC_STEP);
+                            Ok(())
+                        }
+                        None => {
+                            if helper_id as usize >= self.prog.len()
+                                && self.calls.len() < CALL_STACK_LIMIT
+                            {
+                                return Err(EbpfError::HelperNotFound { id: helper_id });
+                            }
+                            if self.calls.len() >= CALL_STACK_LIMIT {
+                                return Err(EbpfError::CallStackExhausted);
+                            }
+                            self.calls.push(self.pc.wrapping_add(1));
+                            self.pc = insn.imm() as usize;
+                            Ok(())
+                        }
+                    }
                 }
-                self.calls.push(self.pc.wrapping_add(1));
-                self.pc = insn.imm() as usize;
-                Ok(())
             }
             op::EXIT => {
                 if let Some(ret_pc) = self.calls.pop() {

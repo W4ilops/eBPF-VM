@@ -20,6 +20,8 @@ pub enum EbpfError {
     UseBeforeInit { pc: usize, reg: u8 },
     InvalidPtrArithmetic { pc: usize },
     TypeMismatch { pc: usize },
+    HelperNotFound { id: u32 },
+    InvalidMapHandle { pc: usize },
 }
 
 impl EbpfError {
@@ -41,6 +43,8 @@ impl EbpfError {
             EbpfError::UseBeforeInit { pc: _, reg: _ } => "use-before-init",
             EbpfError::InvalidPtrArithmetic { pc: _ } => "invalid-ptr-arith",
             EbpfError::TypeMismatch { pc: _ } => "type-mismatch",
+            EbpfError::HelperNotFound { id: _ } => "helper-not-found",
+            EbpfError::InvalidMapHandle { pc: _ } => "invalid-map-handle",
         }
     }
 }
@@ -82,6 +86,8 @@ impl fmt::Display for EbpfError {
                 write!(f, "invalid pointer arithmetic at pc={pc}")
             }
             EbpfError::TypeMismatch { pc } => write!(f, "type mismatch at pc={pc}"),
+            EbpfError::HelperNotFound { id } => write!(f, "helper not found id={id}"),
+            EbpfError::InvalidMapHandle { pc } => write!(f, "invalid map handle at pc={pc}"),
         }
     }
 }
@@ -111,6 +117,8 @@ impl std::error::Error for EbpfError {
             EbpfError::UseBeforeInit { pc: _, reg: _ } => None,
             EbpfError::InvalidPtrArithmetic { pc: _ } => None,
             EbpfError::TypeMismatch { pc: _ } => None,
+            EbpfError::HelperNotFound { id: _ } => None,
+            EbpfError::InvalidMapHandle { pc: _ } => None,
         }
     }
 }
